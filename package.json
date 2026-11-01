@@ -1,0 +1,21 @@
+{
+  "name": "devsync-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DevSync OTP, password reset, and later Gemini matching API. No Firebase Cloud Functions.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.0.2",
+    "nodemailer": "^6.9.16"
+  }
+}
