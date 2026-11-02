@@ -1,7 +1,11 @@
 const express = require('express');
 const otp = require('./otpStore');
 const { sendOtpEmail } = require('./mailer');
-const { updatePassword, markEmailVerified } = require('./firebaseAdmin');
+const {
+  updatePassword,
+  markEmailVerified,
+  createSignInToken,
+} = require('./firebaseAdmin');
 
 const router = express.Router();
 
@@ -14,6 +18,14 @@ function emailFrom(body) {
 function codeFrom(body) {
   const code = String(body?.code || '').replace(/\D/g, '');
   return code.length === 6 ? code : null;
+}
+
+function purposeFrom(body, fallback = 'verify') {
+  const purpose = String(body?.purpose || fallback).toLowerCase();
+  if (purpose === 'reset' || purpose === 'signin' || purpose === 'verify') {
+    return purpose;
+  }
+  return fallback;
 }
 
 async function sendOtp(req, res, purpose) {
@@ -40,19 +52,17 @@ async function sendOtp(req, res, purpose) {
     return res.status(502).json({ ok: false, error: 'Could not send email' });
   }
 
-  // Same body whether or not the address has an account.
   return res.json({ ok: true });
 }
 
 router.post('/otp/send', (req, res) => {
-  const purpose = req.body?.purpose === 'reset' ? 'reset' : 'verify';
-  return sendOtp(req, res, purpose);
+  return sendOtp(req, res, purposeFrom(req.body, 'verify'));
 });
 
 router.post('/otp/verify', (req, res) => {
   const email = emailFrom(req.body);
   const code = codeFrom(req.body);
-  const purpose = req.body?.purpose === 'reset' ? 'reset' : 'verify';
+  const purpose = purposeFrom(req.body, 'verify');
   if (!email || !code) {
     return res.status(400).json({ ok: false, error: 'Enter the 6-digit code' });
   }
@@ -119,6 +129,31 @@ router.post('/email/verify', async (req, res) => {
     return res.status(502).json({ ok: false, error: 'Could not verify email' });
   }
   return res.json({ ok: true });
+});
+
+/** Passwordless sign-in: verify OTP then return a Firebase custom token. */
+router.post('/auth/session', async (req, res) => {
+  const email = emailFrom(req.body);
+  const code = codeFrom(req.body);
+  if (!email || !code) {
+    return res.status(400).json({ ok: false, error: 'Enter the 6-digit code' });
+  }
+  if (!otp.consume(email, code, 'signin')) {
+    return res.status(400).json({ ok: false, error: 'Invalid or expired code' });
+  }
+  try {
+    const customToken = await createSignInToken(email);
+    return res.json({ ok: true, customToken });
+  } catch (error) {
+    if (error.code === 'admin-missing') {
+      return res.status(503).json({
+        ok: false,
+        error: 'Sign-in with code is not configured yet (Firebase Admin)',
+      });
+    }
+    console.error('[devsync-backend] session failed', error.message);
+    return res.status(502).json({ ok: false, error: 'Could not start session' });
+  }
 });
 
 router.post('/matches/generate', (_req, res) => {

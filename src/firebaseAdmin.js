@@ -3,12 +3,20 @@ const admin = require('firebase-admin');
 
 let app;
 
+function loadCredentials() {
+  const value = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (trimmed.startsWith('{')) {
+    return JSON.parse(trimmed);
+  }
+  return JSON.parse(fs.readFileSync(trimmed, 'utf8'));
+}
+
 function getAdmin() {
   if (app) return admin;
-  const path = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (!path) return null;
-  const raw = fs.readFileSync(path, 'utf8');
-  const creds = JSON.parse(raw);
+  const creds = loadCredentials();
+  if (!creds) return null;
   app = admin.initializeApp({ credential: admin.credential.cert(creds) });
   return admin;
 }
@@ -35,4 +43,39 @@ async function markEmailVerified(email) {
   await sdk.auth().updateUser(user.uid, { emailVerified: true });
 }
 
-module.exports = { getAdmin, updatePassword, markEmailVerified };
+/** Find or create the Auth user, then return a custom token for Flutter sign-in. */
+async function createSignInToken(email) {
+  const sdk = getAdmin();
+  if (!sdk) {
+    throw Object.assign(new Error('Firebase Admin is not configured'), {
+      code: 'admin-missing',
+    });
+  }
+
+  let user;
+  try {
+    user = await sdk.auth().getUserByEmail(email);
+  } catch (error) {
+    if (error.code !== 'auth/user-not-found') throw error;
+    user = await sdk.auth().createUser({
+      email,
+      emailVerified: true,
+    });
+  }
+
+  if (!user.emailVerified) {
+    await sdk.auth().updateUser(user.uid, { emailVerified: true });
+  }
+
+  const customToken = await sdk.auth().createCustomToken(user.uid, {
+    signInProvider: 'otp',
+  });
+  return customToken;
+}
+
+module.exports = {
+  getAdmin,
+  updatePassword,
+  markEmailVerified,
+  createSignInToken,
+};
