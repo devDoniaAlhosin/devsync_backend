@@ -156,12 +156,8 @@ router.post('/auth/session', async (req, res) => {
   }
 });
 
-router.post('/matches/generate', (_req, res) => {
-  res.status(501).json({
-    ok: false,
-    error:
-      'Gemini matching is not implemented yet. Emad: call Gemini Flash-Lite here and return { score, reason, skills[] }.',
-  });
-});
+const { generateMatches } = require('./matching/controller');
+
+router.post('/matches/generate', generateMatches);
 
 module.exports = router;
