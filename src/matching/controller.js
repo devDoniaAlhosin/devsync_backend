@@ -37,7 +37,7 @@ async function generateMatches(req, res) {
   try {
     // Fetch candidate projects from Firestore
     const candidates = profile.projects ?? await fetchCandidateProjects();
-    const projects = candidates.filter((p) => p.maintainerId !== profile.uid);
+    const projects = candidates.filter((p) => p.maintainerId !== profile.uid).slice(0, 20);
 
     if (projects.length === 0) {
       console.log('[matching] No projects available');

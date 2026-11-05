@@ -13,3 +13,5 @@ Verification: npm test, 158 passed; all model calls mocked; no live API invoked.
 No secrets inspected/changed; unrelated FLUTTER_TESTING_GUIDE.md excluded.
 Next: Flutter Firestore profile/candidate reads and authenticated HTTP integration.
 Deploy requires private Firebase Admin/Gemini configuration and shared rate limits.
+
+Final backend verification: npm test => 158 passed, zero failed. Legacy server-fetched candidates are now also capped at 20. Previous implementation commit: 2c5f511. No deploy/push/live Gemini verification performed. Flutter work and final smoke checks continue in the sibling repository.

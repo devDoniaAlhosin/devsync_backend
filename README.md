@@ -57,7 +57,7 @@ npm run dev
 
 **Environment variables:**
 - `GEMINI_API_KEY` — Google AI API key (required for AI scoring)
-- `GEMINI_MODEL` — Model name (default: `gemini-2.0-flash-exp`)
+- `GEMINI_MODEL` — Model name (default: `gemini-3.1-flash-lite`)
 
 **Behavior:**
 - When `GEMINI_API_KEY` is set: Uses Gemini for intelligent scoring
@@ -70,6 +70,9 @@ npm run dev
 2. Add to `.env`: `GEMINI_API_KEY=your-key-here`
 3. (Optional) Set `GEMINI_MODEL` to use a different model
 4. Ensure Firestore has projects in the `projects` collection
-5. Test: `npm test` (152 tests should pass)
+5. Test: `npm test` (158 tests should pass)
 
 **Never commit the API key.** Hold `GEMINI_API_KEY` only in this repo's env / Vercel secrets — never in the Flutter app.
+
+Matching requests require a Firebase ID token (Authorization: Bearer ...) matching the profile uid. Flutter may submit up to 20 Firestore candidate projects. Missing or invalid AI items use deterministic scores. Deploy shared Vercel firewall limits in addition to per-instance burst protection. See docs/matching/AGENT_HANDOFF.md for verified local status.
+
