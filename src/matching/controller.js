@@ -26,7 +26,7 @@ async function generateMatches(req, res) {
   const profile = validation.data;
 
   // Handle empty skills early
-  if (profile.declaredSkills.length === 0 && Object.keys(profile.githubLanguages).length === 0) {
+  if (profile.declaredSkills.length === 0) {
     console.log('[matching] Empty skills, returning empty matches');
     return res.json({
       matches: [],
@@ -36,7 +36,8 @@ async function generateMatches(req, res) {
 
   try {
     // Fetch candidate projects from Firestore
-    const projects = await fetchCandidateProjects();
+    const candidates = profile.projects ?? await fetchCandidateProjects();
+    const projects = candidates.filter((p) => p.maintainerId !== profile.uid);
 
     if (projects.length === 0) {
       console.log('[matching] No projects available');

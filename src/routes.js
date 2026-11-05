@@ -158,6 +158,7 @@ router.post('/auth/session', async (req, res) => {
 
 const { generateMatches } = require('./matching/controller');
 
-router.post('/matches/generate', generateMatches);
+const { createMatchingAccess } = require('./matching/access');
+router.post('/matches/generate', createMatchingAccess(), generateMatches);
 
 module.exports = router;

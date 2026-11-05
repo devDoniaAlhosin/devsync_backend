@@ -337,7 +337,7 @@ describe('getGeminiClient', () => {
     delete process.env.GEMINI_MODEL;
     const client = getGeminiClient();
     assert.ok(client);
-    assert.strictEqual(client.modelName, 'gemini-2.0-flash-exp');
+    assert.strictEqual(client.modelName, 'gemini-3.1-flash-lite');
   });
 
   it('uses custom model when GEMINI_MODEL is set', () => {

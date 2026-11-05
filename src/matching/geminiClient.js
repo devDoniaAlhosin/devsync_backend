@@ -7,8 +7,8 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const { buildMatchingPrompt, PROMPT_VERSION } = require('./prompt');
 
-const DEFAULT_MODEL = 'gemini-2.0-flash-exp';
-const REQUEST_TIMEOUT_MS = 10000; // 10 seconds
+const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
+const REQUEST_TIMEOUT_MS = 4000; // Bound inference; fallback requires no additional call.
 const MAX_OUTPUT_TOKENS = 2048;
 
 /**
@@ -25,7 +25,7 @@ function getGeminiClient() {
   try {
     const genAI = new GoogleGenerativeAI(apiKey.trim());
     const modelName = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-    const model = genAI.getGenerativeModel({ model: modelName });
+    const model = genAI.getGenerativeModel({ model: modelName }, { timeout: REQUEST_TIMEOUT_MS });
     return { model, modelName };
   } catch (error) {
     console.error('[gemini] Failed to initialize client:', error.message);
@@ -40,8 +40,8 @@ function getGeminiClient() {
  * @param {object[]} projects - Candidate projects
  * @returns {Promise<object|null>} - Scoring results or null on failure
  */
-async function scoreWithGemini(profile, projects) {
-  const client = getGeminiClient();
+async function scoreWithGemini(profile, projects, clientOverride) {
+  const client = clientOverride === undefined ? getGeminiClient() : clientOverride;
   if (!client) {
     console.log('[gemini] API key not configured, using fallback');
     return null;
@@ -59,19 +59,20 @@ async function scoreWithGemini(profile, projects) {
     console.log(`[gemini] Requesting scores from ${modelName} for ${projects.length} projects`);
 
     // Make the API call with timeout
-    const result = await Promise.race([
-      model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.3, // Lower temperature for more consistent scoring
-          maxOutputTokens: MAX_OUTPUT_TOKENS,
-          responseMimeType: 'application/json',
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: MAX_OUTPUT_TOKENS,
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: 'array', items: { type: 'object', properties: {
+            projectId: { type: 'string' }, score: { type: 'integer' },
+            reason: { type: 'string' },
+          }, required: ['projectId', 'score', 'reason'] },
         },
-      }),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Gemini request timeout')), REQUEST_TIMEOUT_MS)
-      ),
-    ]);
+      },
+    });
 
     const response = await result.response;
     const text = response.text();
@@ -86,7 +87,7 @@ async function scoreWithGemini(profile, projects) {
     try {
       parsed = JSON.parse(text);
     } catch (parseError) {
-      console.error('[gemini] Invalid JSON response:', text.slice(0, 200));
+      console.error('[gemini] Invalid JSON response');
       return null;
     }
 
@@ -99,7 +100,7 @@ async function scoreWithGemini(profile, projects) {
 
     console.log(`[gemini] Successfully scored ${validated.matches.length} projects`);
     return {
-      matches: validated.matches,
+      matches: completeMatches(validated.matches, profile, projects),
       promptVersion: PROMPT_VERSION,
     };
   } catch (error) {
@@ -111,7 +112,7 @@ async function scoreWithGemini(profile, projects) {
     } else if (error.statusCode >= 500) {
       console.error('[gemini] Server error:', error.statusCode);
     } else {
-      console.error('[gemini] Request failed:', error.message);
+      console.error('[gemini] Request failed');
     }
     return null;
   }
@@ -222,7 +223,18 @@ function sanitizeReason(reason) {
   return sanitized || 'No reason provided';
 }
 
+// Missing or invalid items use evidence-based scores, never invented AI reasons.
+function completeMatches(matches, profile, projects) {
+  const byId = new Map(matches.map(m => [m.projectId, m]));
+  const { scoreMatches } = require('./scoring');
+  return scoreMatches(profile, projects).map(fallback => {
+    const match = byId.get(fallback.projectId);
+    return match && match.reason !== 'No reason provided' ? match : fallback;
+  });
+}
+
 module.exports = {
+  completeMatches,
   scoreWithGemini,
   getGeminiClient,
   validateGeminiResponse,

@@ -142,6 +142,40 @@ function validateMatchRequest(body) {
     }
   }
 
+  // Candidate payloads come from the authenticated Flutter client's Firestore
+  // reads. These are untrusted scoring inputs, never authorization evidence.
+  let projects;
+  if (body.projects !== undefined) {
+    if (!Array.isArray(body.projects) || body.projects.length > 20) {
+      return { ok: false, error: 'projects must be an array of at most 20 candidates' };
+    }
+    projects = [];
+    const ids = new Set();
+    for (const p of body.projects) {
+      if (!p || typeof p !== 'object' || typeof p.projectId !== 'string' ||
+          !p.projectId.trim() || p.projectId.length > 128 || ids.has(p.projectId) ||
+          typeof p.projectName !== 'string' || !p.projectName.trim() || p.projectName.length > 200 ||
+          typeof p.description !== 'string' || p.description.length > 1000 ||
+          typeof p.githubUrl !== 'string' || p.githubUrl.length > 500 ||
+          !Array.isArray(p.neededSkills) || p.neededSkills.length > 30 ||
+          p.neededSkills.some(s => typeof s !== 'string' || !s.trim() || s.length > 100) ||
+          (p.maintainerId != null && (typeof p.maintainerId !== 'string' || p.maintainerId.length > 128))) {
+        return { ok: false, error: 'Invalid or duplicate project candidate' };
+      }
+      ids.add(p.projectId);
+      projects.push({ projectId: p.projectId, projectName: p.projectName,
+        description: p.description, githubUrl: p.githubUrl,
+        neededSkills: [...new Set(p.neededSkills.map(s => s.trim()))],
+        maintainerId: p.maintainerId ?? null });
+    }
+  }
+  if (body.prompt !== undefined && (typeof body.prompt !== 'string' || body.prompt.length > 1000)) {
+    return { ok: false, error: 'prompt must be a string of at most 1000 characters' };
+  }
+  if (body.tags !== undefined && (!Array.isArray(body.tags) || body.tags.length > 30 ||
+      body.tags.some(t => typeof t !== 'string' || t.length > 100))) {
+    return { ok: false, error: 'Invalid preference tags' };
+  }
   // Return normalized and validated data
   return {
     ok: true,
@@ -153,6 +187,9 @@ function validateMatchRequest(body) {
       totalContributions,
       bio,
       topRepositories,
+      ...(projects !== undefined ? { projects } : {}),
+      prompt: body.prompt || '',
+      tags: body.tags || [],
     },
   };
 }

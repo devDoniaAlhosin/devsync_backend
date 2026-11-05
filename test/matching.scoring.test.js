@@ -164,7 +164,7 @@ describe('scoreMatches', () => {
   it('tie-breaks deterministically by projectId', () => {
     const profile = {
       ...baseProfile,
-      declaredSkills: [],
+      declaredSkills: ['Dart'],
       githubLanguages: {},
       publicRepoCount: 0,
       totalContributions: 0,
@@ -198,8 +198,7 @@ describe('scoreMatches', () => {
       githubLanguages: {},
     };
     const results = scoreMatches(profile, [baseProject]);
-    assert.strictEqual(results.length, 1);
-    assert.ok(results[0].score <= 10); // Only activity bonus
+    assert.strictEqual(results.length, 0);
   });
 
   it('handles missing githubLanguages gracefully', () => {
@@ -218,8 +217,7 @@ describe('scoreMatches', () => {
       declaredSkills: undefined,
     };
     const results = scoreMatches(profile, [baseProject]);
-    assert.strictEqual(results.length, 1);
-    // Should still work with GitHub languages
+    assert.strictEqual(results.length, 0);
   });
 
   it('preserves original skill casing from project in results', () => {

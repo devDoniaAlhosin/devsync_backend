@@ -30,7 +30,7 @@ const { getSkillCanonical, skillsMatch } = require('./validation');
  * @returns {object[]} - Array of match results sorted by score descending
  */
 function scoreMatches(profile, projects) {
-  if (!profile || !Array.isArray(projects)) {
+  if (!profile || !Array.isArray(projects) || !profile.declaredSkills?.length) {
     return [];
   }
 

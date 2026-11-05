@@ -199,3 +199,6 @@ The `MatchingHttpRemoteDataSource` does not add any `Authorization` header. If a
 3. Add validation for max candidate count (token budget constraint)
 4. Implement deterministic fallback using fetched projects
 5. Integrate Gemini with fetched project data
+
+## 2026-11-05 client integration
+POST requires Authorization: Bearer <Firebase ID token>; uid must match. Optional projects contains up to 20 candidates with projectId, projectName, description, githubUrl, neededSkills and optional maintainerId. Flutter obtains these via Firestore client rules. Optional prompt (1000 chars) and tags are preferences, never claimed skills. No declared skills returns no matches. 401/403/429/503 are explicit failures. Shared Vercel rate limiting must complement instance burst protection.
