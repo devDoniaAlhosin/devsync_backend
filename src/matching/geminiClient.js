@@ -25,7 +25,7 @@ function getGeminiClient() {
   try {
     const genAI = new GoogleGenerativeAI(apiKey.trim());
     const modelName = process.env.GEMINI_MODEL || DEFAULT_MODEL;
-    const model = genAI.getGenerativeModel({ model: modelName }, { timeout: REQUEST_TIMEOUT_MS });
+    const model = genAI.getGenerativeModel({ model: modelName });
     return { model, modelName };
   } catch (error) {
     console.error('[gemini] Failed to initialize client:', error.message);
