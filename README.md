@@ -40,6 +40,7 @@ npm run dev
 | POST | `/email/verify` | `{ email, code }` |
 | POST | `/auth/session` | `{ email, code }` → `{ ok, customToken }` (consumes purpose `signin` OTP) |
 | POST | `/matches/generate` | Stub for Emad (Gemini later) — matching HTTP is this POST only |
+| POST | `/notify` | Bearer ID token. `{ requestId, event: "request_received" \| "request_accepted" }` → inbox + FCM (Admin) |
 
 **Why `POST /auth/session`?** Passwordless sign-in with a code cannot use Firebase Auth’s normal email/password APIs with only an OTP. This route verifies the `signin` OTP, uses the Admin SDK to find or create the user, mints a **Firebase custom token**, and returns `{ ok, customToken }`. Flutter then calls `signInWithCustomToken` so Firebase issues a real Auth session. Minting custom tokens requires a service account and must stay on this server — never in the Flutter app.
 
