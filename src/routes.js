@@ -5,6 +5,9 @@ const {
   updatePassword,
   markEmailVerified,
   createSignInToken,
+  getAdmin,
+  verifyIdToken,
+  notifyUser,
 } = require('./firebaseAdmin');
 
 const router = express.Router();
@@ -160,5 +163,106 @@ const { generateMatches } = require('./matching/controller');
 
 const { createMatchingAccess } = require('./matching/access');
 router.post('/matches/generate', createMatchingAccess(), generateMatches);
+
+/**
+ * Authenticated push + inbox write for collaboration request events.
+ * Body: { requestId, event: 'request_received' | 'request_accepted' }
+ */
+router.post('/notify', async (req, res) => {
+  let decoded;
+  try {
+    decoded = await verifyIdToken(req.headers.authorization);
+  } catch (error) {
+    if (error.code === 'admin-missing') {
+      return res.status(503).json({
+        ok: false,
+        error: 'Notifications are not configured yet (Firebase Admin)',
+      });
+    }
+    return res.status(401).json({ ok: false, error: 'Sign in required' });
+  }
+
+  const requestId = String(req.body?.requestId || '').trim();
+  const event = String(req.body?.event || '').trim();
+  if (!requestId) {
+    return res.status(400).json({ ok: false, error: 'requestId is required' });
+  }
+  if (event !== 'request_received' && event !== 'request_accepted') {
+    return res.status(400).json({ ok: false, error: 'Invalid event' });
+  }
+
+  const sdk = getAdmin();
+  if (!sdk) {
+    return res.status(503).json({
+      ok: false,
+      error: 'Notifications are not configured yet (Firebase Admin)',
+    });
+  }
+
+  let requestSnap;
+  try {
+    requestSnap = await sdk.firestore().collection('requests').doc(requestId).get();
+  } catch (error) {
+    console.error('[devsync-backend] notify load request failed', error.message);
+    return res.status(502).json({ ok: false, error: 'Could not load request' });
+  }
+
+  if (!requestSnap.exists) {
+    return res.status(404).json({ ok: false, error: 'Request not found' });
+  }
+
+  const data = requestSnap.data() || {};
+  const senderId = String(data.senderId || '');
+  const ownerId = String(data.ownerId || '');
+  const projectId = String(data.projectId || '');
+  const projectTitle = String(data.title || data.targetName || 'a project');
+  const status = String(data.status || '');
+  const uid = decoded.uid;
+
+  let targetUid;
+  let title;
+  let body;
+
+  if (event === 'request_received') {
+    if (uid !== senderId) {
+      return res.status(403).json({ ok: false, error: 'Only the sender can notify' });
+    }
+    targetUid = ownerId;
+    title = 'New collaboration request';
+    body = `${data.displayName || 'A developer'} wants to join ${projectTitle}`;
+  } else {
+    if (uid !== ownerId) {
+      return res.status(403).json({ ok: false, error: 'Only the owner can notify' });
+    }
+    if (status !== 'accepted') {
+      return res.status(400).json({
+        ok: false,
+        error: 'Request must be accepted before notifying',
+      });
+    }
+    targetUid = senderId;
+    title = 'Request accepted';
+    body = `You were accepted on ${projectTitle}`;
+  }
+
+  if (!targetUid) {
+    return res.status(400).json({ ok: false, error: 'Missing target user' });
+  }
+
+  try {
+    const result = await notifyUser({
+      targetUid,
+      title,
+      body,
+      type: event,
+      requestId,
+      projectId,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (error) {
+    console.error('[devsync-backend] notify failed', error.message);
+    return res.status(502).json({ ok: false, error: 'Could not send notification' });
+  }
+});
 
 module.exports = router;

@@ -73,9 +73,104 @@ async function createSignInToken(email) {
   return customToken;
 }
 
+/**
+ * Verify a Firebase ID token from `Authorization: Bearer …`.
+ * @returns {Promise<import('firebase-admin/auth').DecodedIdToken>}
+ */
+async function verifyIdToken(authorizationHeader) {
+  const sdk = getAdmin();
+  if (!sdk) {
+    throw Object.assign(new Error('Firebase Admin is not configured'), {
+      code: 'admin-missing',
+    });
+  }
+  const raw = String(authorizationHeader || '');
+  const match = raw.match(/^Bearer\s+(.+)$/i);
+  if (!match) {
+    throw Object.assign(new Error('Missing Bearer token'), { code: 'unauthenticated' });
+  }
+  return sdk.auth().verifyIdToken(match[1].trim());
+}
+
+/**
+ * Write inbox doc + send FCM to all tokens under users/{uid}/fcmTokens.
+ */
+async function notifyUser({
+  targetUid,
+  title,
+  body,
+  type,
+  requestId,
+  projectId,
+  data = {},
+}) {
+  const sdk = getAdmin();
+  if (!sdk) {
+    throw Object.assign(new Error('Firebase Admin is not configured'), {
+      code: 'admin-missing',
+    });
+  }
+
+  const db = sdk.firestore();
+  const inboxRef = db
+    .collection('users')
+    .doc(targetUid)
+    .collection('notifications')
+    .doc();
+
+  await inboxRef.set({
+    type,
+    title,
+    body,
+    requestId: requestId || '',
+    projectId: projectId || '',
+    read: false,
+    createdAt: sdk.firestore.FieldValue.serverTimestamp(),
+  });
+
+  const tokensSnap = await db
+    .collection('users')
+    .doc(targetUid)
+    .collection('fcmTokens')
+    .get();
+
+  const tokens = tokensSnap.docs
+    .map((doc) => doc.id)
+    .filter((t) => typeof t === 'string' && t.length > 0);
+
+  if (tokens.length === 0) {
+    return { inboxId: inboxRef.id, sent: 0 };
+  }
+
+  const payloadData = {
+    title: String(title),
+    body: String(body),
+    type: String(type),
+    requestId: String(requestId || ''),
+    projectId: String(projectId || ''),
+    ...Object.fromEntries(
+      Object.entries(data).map(([k, v]) => [k, String(v ?? '')]),
+    ),
+  };
+
+  const response = await sdk.messaging().sendEachForMulticast({
+    tokens,
+    notification: { title, body },
+    data: payloadData,
+  });
+
+  return {
+    inboxId: inboxRef.id,
+    sent: response.successCount,
+    failureCount: response.failureCount,
+  };
+}
+
 module.exports = {
   getAdmin,
   updatePassword,
   markEmailVerified,
   createSignInToken,
+  verifyIdToken,
+  notifyUser,
 };
