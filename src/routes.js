@@ -9,6 +9,7 @@ const {
   verifyIdToken,
   notifyUser,
 } = require('./firebaseAdmin');
+const { acceptedCollaboratorIds } = require('./notifyHelpers');
 
 const router = express.Router();
 
@@ -165,8 +166,10 @@ const { createMatchingAccess } = require('./matching/access');
 router.post('/matches/generate', createMatchingAccess(), generateMatches);
 
 /**
- * Authenticated push + inbox write for collaboration request events.
- * Body: { requestId, event: 'request_received' | 'request_accepted' }
+ * Authenticated push + inbox write.
+ * Body:
+ *   { requestId, event: 'request_received' | 'request_accepted' }
+ *   { projectId, event: 'project_updated' }
  */
 router.post('/notify', async (req, res) => {
   let decoded;
@@ -182,12 +185,15 @@ router.post('/notify', async (req, res) => {
     return res.status(401).json({ ok: false, error: 'Sign in required' });
   }
 
-  const requestId = String(req.body?.requestId || '').trim();
   const event = String(req.body?.event || '').trim();
-  if (!requestId) {
-    return res.status(400).json({ ok: false, error: 'requestId is required' });
-  }
-  if (event !== 'request_received' && event !== 'request_accepted') {
+  const requestId = String(req.body?.requestId || '').trim();
+  const projectIdBody = String(req.body?.projectId || '').trim();
+
+  if (
+    event !== 'request_received' &&
+    event !== 'request_accepted' &&
+    event !== 'project_updated'
+  ) {
     return res.status(400).json({ ok: false, error: 'Invalid event' });
   }
 
@@ -199,57 +205,114 @@ router.post('/notify', async (req, res) => {
     });
   }
 
-  let requestSnap;
-  try {
-    requestSnap = await sdk.firestore().collection('requests').doc(requestId).get();
-  } catch (error) {
-    console.error('[devsync-backend] notify load request failed', error.message);
-    return res.status(502).json({ ok: false, error: 'Could not load request' });
-  }
-
-  if (!requestSnap.exists) {
-    return res.status(404).json({ ok: false, error: 'Request not found' });
-  }
-
-  const data = requestSnap.data() || {};
-  const senderId = String(data.senderId || '');
-  const ownerId = String(data.ownerId || '');
-  const projectId = String(data.projectId || '');
-  const projectTitle = String(data.title || data.targetName || 'a project');
-  const status = String(data.status || '');
   const uid = decoded.uid;
 
-  let targetUid;
-  let title;
-  let body;
+  try {
+    if (event === 'project_updated') {
+      if (!projectIdBody) {
+        return res.status(400).json({ ok: false, error: 'projectId is required' });
+      }
 
-  if (event === 'request_received') {
-    if (uid !== senderId) {
-      return res.status(403).json({ ok: false, error: 'Only the sender can notify' });
-    }
-    targetUid = ownerId;
-    title = 'New collaboration request';
-    body = `${data.displayName || 'A developer'} wants to join ${projectTitle}`;
-  } else {
-    if (uid !== ownerId) {
-      return res.status(403).json({ ok: false, error: 'Only the owner can notify' });
-    }
-    if (status !== 'accepted') {
-      return res.status(400).json({
-        ok: false,
-        error: 'Request must be accepted before notifying',
+      const projectSnap = await sdk
+        .firestore()
+        .collection('projects')
+        .doc(projectIdBody)
+        .get();
+      if (!projectSnap.exists) {
+        return res.status(404).json({ ok: false, error: 'Project not found' });
+      }
+
+      const project = projectSnap.data() || {};
+      const ownerId = String(project.ownerId || project.ownerUid || '');
+      if (!ownerId || uid !== ownerId) {
+        return res.status(403).json({ ok: false, error: 'Only the owner can notify' });
+      }
+
+      const projectTitle = String(project.title || 'a project');
+      const requestsSnap = await sdk
+        .firestore()
+        .collection('requests')
+        .where('projectId', '==', projectIdBody)
+        .get();
+
+      const targets = acceptedCollaboratorIds(requestsSnap.docs, uid);
+
+      let sent = 0;
+      let failureCount = 0;
+      const inboxIds = [];
+      for (const targetUid of targets) {
+        const result = await notifyUser({
+          targetUid,
+          title: 'Project updated',
+          body: `${projectTitle} was updated by the maintainer`,
+          type: event,
+          requestId: '',
+          projectId: projectIdBody,
+        });
+        sent += result.sent || 0;
+        failureCount += result.failureCount || 0;
+        if (result.inboxId) inboxIds.push(result.inboxId);
+      }
+
+      return res.json({
+        ok: true,
+        targets: targets.length,
+        sent,
+        failureCount,
+        inboxIds,
       });
     }
-    targetUid = senderId;
-    title = 'Request accepted';
-    body = `You were accepted on ${projectTitle}`;
-  }
 
-  if (!targetUid) {
-    return res.status(400).json({ ok: false, error: 'Missing target user' });
-  }
+    if (!requestId) {
+      return res.status(400).json({ ok: false, error: 'requestId is required' });
+    }
 
-  try {
+    const requestSnap = await sdk
+      .firestore()
+      .collection('requests')
+      .doc(requestId)
+      .get();
+    if (!requestSnap.exists) {
+      return res.status(404).json({ ok: false, error: 'Request not found' });
+    }
+
+    const data = requestSnap.data() || {};
+    const senderId = String(data.senderId || '');
+    const ownerId = String(data.ownerId || '');
+    const projectId = String(data.projectId || '');
+    const projectTitle = String(data.title || data.targetName || 'a project');
+    const status = String(data.status || '');
+
+    let targetUid;
+    let title;
+    let body;
+
+    if (event === 'request_received') {
+      if (uid !== senderId) {
+        return res.status(403).json({ ok: false, error: 'Only the sender can notify' });
+      }
+      targetUid = ownerId;
+      title = 'New collaboration request';
+      body = `${data.displayName || 'A developer'} wants to join ${projectTitle}`;
+    } else {
+      if (uid !== ownerId) {
+        return res.status(403).json({ ok: false, error: 'Only the owner can notify' });
+      }
+      if (status !== 'accepted') {
+        return res.status(400).json({
+          ok: false,
+          error: 'Request must be accepted before notifying',
+        });
+      }
+      targetUid = senderId;
+      title = 'Request accepted';
+      body = `You were accepted on ${projectTitle}`;
+    }
+
+    if (!targetUid) {
+      return res.status(400).json({ ok: false, error: 'Missing target user' });
+    }
+
     const result = await notifyUser({
       targetUid,
       title,

@@ -112,11 +112,8 @@ async function notifyUser({
   }
 
   const db = sdk.firestore();
-  const inboxRef = db
-    .collection('users')
-    .doc(targetUid)
-    .collection('notifications')
-    .doc();
+  const userRef = db.collection('users').doc(targetUid);
+  const inboxRef = userRef.collection('notifications').doc();
 
   await inboxRef.set({
     type,
@@ -128,11 +125,29 @@ async function notifyUser({
     createdAt: sdk.firestore.FieldValue.serverTimestamp(),
   });
 
-  const tokensSnap = await db
-    .collection('users')
-    .doc(targetUid)
-    .collection('fcmTokens')
-    .get();
+  // Respect Settings → Notifications toggles (default on).
+  let pushAllowed = true;
+  try {
+    const userSnap = await userRef.get();
+    const prefs = (userSnap.data() || {}).notificationPrefs || {};
+    const eventType = String(type || '');
+    const isRequest =
+      eventType === 'request_received' ||
+      eventType === 'request_accepted' ||
+      eventType === 'project_updated';
+    const isMatch =
+      eventType === 'new_match' || eventType.startsWith('match_');
+    if (isRequest && prefs.requests === false) pushAllowed = false;
+    if (isMatch && prefs.matches === false) pushAllowed = false;
+  } catch (error) {
+    console.error('[devsync-backend] notify prefs read failed', error.message);
+  }
+
+  if (!pushAllowed) {
+    return { inboxId: inboxRef.id, sent: 0, skipped: 'prefs' };
+  }
+
+  const tokensSnap = await userRef.collection('fcmTokens').get();
 
   const tokens = tokensSnap.docs
     .map((doc) => doc.id)
